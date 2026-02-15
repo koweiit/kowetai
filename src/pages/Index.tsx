@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Mic, MicOff, Menu } from "lucide-react";
-import { streamChat, fileToBase64, type ChatMessage } from "@/lib/chat";
+import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Mic, MicOff, Menu, Square } from "lucide-react";
+import { streamChat, generateTitle, fileToBase64, type ChatMessage } from "@/lib/chat";
 import { toast } from "sonner";
 import CodeBlock from "@/components/chat/CodeBlock";
+import MessageActions from "@/components/chat/MessageActions";
+import ModelSelector from "@/components/chat/ModelSelector";
 import ChatSidebar, { type Conversation } from "@/components/chat/ChatSidebar";
 
 type UIMessage = {
@@ -23,7 +25,6 @@ const loadConversations = (): Conversation[] => {
 };
 
 const saveConversations = (convs: Conversation[]) => {
-  // Don't save base64 images to localStorage (too large)
   const cleaned = convs.map((c) => ({
     ...c,
     messages: c.messages.map((m: UIMessage) => ({ ...m, images: undefined })),
@@ -85,56 +86,73 @@ const EmptyState = ({ onSuggestionClick }: { onSuggestionClick: (s: string) => v
   );
 };
 
-const MessageBubble = ({ msg }: { msg: UIMessage }) => {
+const MessageBubble = ({
+  msg,
+  isLast,
+  onRegenerate,
+}: {
+  msg: UIMessage;
+  isLast: boolean;
+  onRegenerate?: () => void;
+}) => {
   const isUser = msg.role === "user";
 
   return (
-    <div className={`flex gap-3 ${isUser ? "justify-end" : ""} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+    <div className={`group flex gap-3 ${isUser ? "justify-end" : ""} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
       {!isUser && (
         <div className="w-8 h-8 rounded-xl bg-primary/20 border border-primary/30 flex-shrink-0 flex items-center justify-center mt-1">
           <Bot className="w-4 h-4 text-primary" />
         </div>
       )}
-      <div
-        className={`max-w-[75%] rounded-2xl px-4 py-3 ${
-          isUser
-            ? "bg-primary text-primary-foreground rounded-br-md"
-            : "bg-card/80 backdrop-blur-sm border border-border text-foreground rounded-bl-md"
-        }`}
-      >
-        {msg.images && msg.images.length > 0 && (
-          <div className="flex gap-2 mb-2 flex-wrap">
-            {msg.images.map((img, j) => (
-              <img
-                key={j}
-                src={img}
-                alt="attachment"
-                className="max-w-[200px] max-h-[200px] rounded-xl object-cover border border-border/50"
-              />
-            ))}
-          </div>
-        )}
-        {isUser ? (
-          <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
-        ) : (
-          <div className="prose prose-sm prose-invert max-w-none [&_pre]:bg-transparent [&_pre]:border-none [&_pre]:p-0 [&_pre]:m-0 [&_code]:text-foreground [&_code]:font-mono [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_a]:text-primary [&_strong]:text-foreground [&_li]:text-foreground/90">
-            <ReactMarkdown
-              components={{
-                code({ className, children, ...props }) {
-                  const isBlock = className?.startsWith("language-");
-                  if (isBlock) {
-                    return <CodeBlock className={className}>{children}</CodeBlock>;
-                  }
-                  return <code className={className} {...props}>{children}</code>;
-                },
-                pre({ children }) {
-                  return <>{children}</>;
-                },
-              }}
-            >
-              {msg.content}
-            </ReactMarkdown>
-          </div>
+      <div className={`max-w-[75%] ${isUser ? "" : "flex-1 max-w-[75%]"}`}>
+        <div
+          className={`rounded-2xl px-4 py-3 ${
+            isUser
+              ? "bg-primary text-primary-foreground rounded-br-md"
+              : "bg-card/80 backdrop-blur-sm border border-border text-foreground rounded-bl-md"
+          }`}
+        >
+          {msg.images && msg.images.length > 0 && (
+            <div className="flex gap-2 mb-2 flex-wrap">
+              {msg.images.map((img, j) => (
+                <img
+                  key={j}
+                  src={img}
+                  alt="attachment"
+                  className="max-w-[200px] max-h-[200px] rounded-xl object-cover border border-border/50"
+                />
+              ))}
+            </div>
+          )}
+          {isUser ? (
+            <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+          ) : (
+            <div className="prose prose-sm prose-invert max-w-none [&_pre]:bg-transparent [&_pre]:border-none [&_pre]:p-0 [&_pre]:m-0 [&_code]:text-foreground [&_code]:font-mono [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_a]:text-primary [&_strong]:text-foreground [&_li]:text-foreground/90">
+              <ReactMarkdown
+                components={{
+                  code({ className, children, ...props }) {
+                    const isBlock = className?.startsWith("language-");
+                    if (isBlock) {
+                      return <CodeBlock className={className}>{children}</CodeBlock>;
+                    }
+                    return <code className={className} {...props}>{children}</code>;
+                  },
+                  pre({ children }) {
+                    return <>{children}</>;
+                  },
+                }}
+              >
+                {msg.content}
+              </ReactMarkdown>
+            </div>
+          )}
+        </div>
+        {!isUser && msg.content && (
+          <MessageActions
+            content={msg.content}
+            onRegenerate={onRegenerate}
+            showRegenerate={isLast}
+          />
         )}
       </div>
       {isUser && (
@@ -158,10 +176,12 @@ const Index = () => {
   const [attachments, setAttachments] = useState<{ file: File; preview: string }[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("google/gemini-2.5-flash");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Load messages when switching conversation
   useEffect(() => {
@@ -210,6 +230,14 @@ const Index = () => {
     return id;
   };
 
+  const updateConversationTitle = (convId: string, title: string) => {
+    setConversations((prev) => {
+      const updated = prev.map((c) => (c.id === convId ? { ...c, title } : c));
+      saveConversations(updated);
+      return updated;
+    });
+  };
+
   const handleNewChat = () => {
     setActiveConvId(null);
     setMessages([]);
@@ -254,12 +282,70 @@ const Index = () => {
     });
   };
 
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsLoading(false);
+    }
+  };
+
+  const sendMessages = async (apiMessages: ChatMessage[], convId: string, isFirstMessage: boolean) => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    let assistantSoFar = "";
+    const upsertAssistant = (chunk: string) => {
+      assistantSoFar += chunk;
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant") {
+          return prev.map((m, i) =>
+            i === prev.length - 1 ? { ...m, content: assistantSoFar } : m
+          );
+        }
+        return [...prev, { role: "assistant", content: assistantSoFar }];
+      });
+    };
+
+    try {
+      await streamChat({
+        messages: apiMessages,
+        model: selectedModel,
+        onDelta: upsertAssistant,
+        onDone: () => {
+          setIsLoading(false);
+          abortControllerRef.current = null;
+        },
+        onError: (err) => {
+          toast.error(err);
+          setIsLoading(false);
+          abortControllerRef.current = null;
+        },
+        signal: controller.signal,
+      });
+
+      // Auto-generate title after first exchange
+      if (isFirstMessage) {
+        generateTitle(apiMessages).then((title) => {
+          updateConversationTitle(convId, title);
+        }).catch(() => {});
+      }
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        toast.error("Erreur de connexion");
+      }
+      setIsLoading(false);
+      abortControllerRef.current = null;
+    }
+  };
+
   const send = async () => {
     const text = input.trim();
     if (!text && attachments.length === 0) return;
 
-    // Create conversation if needed
     let convId = activeConvId;
+    const isFirstMessage = !convId;
     if (!convId) {
       convId = createConversation(text);
     }
@@ -292,34 +378,28 @@ const Index = () => {
       return { role: m.role, content: m.content };
     });
 
-    let assistantSoFar = "";
-    const upsertAssistant = (chunk: string) => {
-      assistantSoFar += chunk;
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return prev.map((m, i) =>
-            i === prev.length - 1 ? { ...m, content: assistantSoFar } : m
-          );
-        }
-        return [...prev, { role: "assistant", content: assistantSoFar }];
-      });
-    };
+    await sendMessages(apiMessages, convId, isFirstMessage);
+  };
 
-    try {
-      await streamChat({
-        messages: apiMessages,
-        onDelta: upsertAssistant,
-        onDone: () => setIsLoading(false),
-        onError: (err) => {
-          toast.error(err);
-          setIsLoading(false);
-        },
-      });
-    } catch {
-      toast.error("Erreur de connexion");
-      setIsLoading(false);
-    }
+  const regenerate = async () => {
+    if (isLoading || messages.length < 2) return;
+
+    // Remove last assistant message
+    const newMessages = messages.slice(0, -1);
+    setMessages(newMessages);
+    setIsLoading(true);
+
+    const apiMessages: ChatMessage[] = newMessages.map((m) => {
+      if (m.images && m.images.length > 0) {
+        const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+        if (m.content) content.push({ type: "text", text: m.content });
+        m.images.forEach((img) => content.push({ type: "image_url", image_url: { url: img } }));
+        return { role: m.role, content };
+      }
+      return { role: m.role, content: m.content };
+    });
+
+    await sendMessages(apiMessages, activeConvId!, false);
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -406,9 +486,7 @@ const Index = () => {
           </div>
           <div className="flex-1">
             <h1 className="text-lg font-bold text-foreground tracking-tight">NexusAI</h1>
-            <p className="text-[10px] text-muted-foreground font-mono tracking-widest uppercase">
-              Gemini 2.5 Flash • Online
-            </p>
+            <ModelSelector model={selectedModel} onChange={setSelectedModel} />
           </div>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -420,7 +498,12 @@ const Index = () => {
         <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
           {messages.length === 0 && <EmptyState onSuggestionClick={setInput} />}
           {messages.map((msg, i) => (
-            <MessageBubble key={i} msg={msg} />
+            <MessageBubble
+              key={i}
+              msg={msg}
+              isLast={i === messages.length - 1 && msg.role === "assistant"}
+              onRegenerate={regenerate}
+            />
           ))}
           {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
             <div className="flex gap-3 animate-in fade-in duration-300">
@@ -479,13 +562,22 @@ const Index = () => {
             >
               {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </button>
-            <button
-              onClick={send}
-              disabled={isLoading || (!input.trim() && attachments.length === 0)}
-              className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-all duration-200 disabled:opacity-30 flex-shrink-0 glow-primary"
-            >
-              {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-            </button>
+            {isLoading ? (
+              <button
+                onClick={stopGeneration}
+                className="p-2.5 rounded-xl bg-destructive text-destructive-foreground hover:opacity-90 transition-all duration-200 flex-shrink-0"
+              >
+                <Square className="w-5 h-5" />
+              </button>
+            ) : (
+              <button
+                onClick={send}
+                disabled={!input.trim() && attachments.length === 0}
+                className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-all duration-200 disabled:opacity-30 flex-shrink-0 glow-primary"
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            )}
           </div>
           <p className="text-[10px] text-muted-foreground/50 text-center mt-2 font-mono">
             NexusAI peut faire des erreurs. Vérifie les informations importantes.

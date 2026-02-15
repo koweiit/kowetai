@@ -7,14 +7,18 @@ const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
 export async function streamChat({
   messages,
+  model,
   onDelta,
   onDone,
   onError,
+  signal,
 }: {
   messages: ChatMessage[];
+  model?: string;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError: (error: string) => void;
+  signal?: AbortSignal;
 }) {
   const resp = await fetch(CHAT_URL, {
     method: "POST",
@@ -22,7 +26,8 @@ export async function streamChat({
       "Content-Type": "application/json",
       Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
     },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages, model }),
+    signal,
   });
 
   if (!resp.ok) {
@@ -90,6 +95,55 @@ export async function streamChat({
   }
 
   onDone();
+}
+
+export async function generateTitle(messages: ChatMessage[]): Promise<string> {
+  const resp = await fetch(CHAT_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+    },
+    body: JSON.stringify({
+      messages: [
+        {
+          role: "user",
+          content: `Génère un titre TRÈS COURT (max 6 mots) pour cette conversation. Réponds UNIQUEMENT avec le titre, sans guillemets ni ponctuation finale.\n\nPremier message: "${typeof messages[0]?.content === 'string' ? messages[0].content : 'conversation'}"`,
+        },
+      ],
+      generateTitle: true,
+    }),
+  });
+
+  if (!resp.ok || !resp.body) return typeof messages[0]?.content === 'string' ? messages[0].content.slice(0, 40) : "Nouvelle conversation";
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let result = "";
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      let line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      if (!line.startsWith("data: ")) continue;
+      const jsonStr = line.slice(6).trim();
+      if (jsonStr === "[DONE]") break;
+      try {
+        const parsed = JSON.parse(jsonStr);
+        const content = parsed.choices?.[0]?.delta?.content;
+        if (content) result += content;
+      } catch { /* ignore */ }
+    }
+  }
+
+  return result.trim().slice(0, 50) || "Nouvelle conversation";
 }
 
 export function fileToBase64(file: File): Promise<string> {
