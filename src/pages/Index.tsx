@@ -226,6 +226,18 @@ const Index = () => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Reset chat when user logs out
+  useEffect(() => {
+    if (!user) {
+      setMessages([]);
+      setActiveConvId(null);
+      setConversations([]);
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(GUEST_COUNT_KEY);
+      setGuestCount(0);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
