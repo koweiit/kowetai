@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Mic, MicOff, Menu, Square } from "lucide-react";
+import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Mic, MicOff, Menu, Square, LogIn } from "lucide-react";
 import { streamChat, generateTitle, fileToBase64, type ChatMessage } from "@/lib/chat";
 import { toast } from "sonner";
 import CodeBlock from "@/components/chat/CodeBlock";
 import MessageActions from "@/components/chat/MessageActions";
 import ModelSelector from "@/components/chat/ModelSelector";
 import ChatSidebar, { type Conversation } from "@/components/chat/ChatSidebar";
+import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
 
 type UIMessage = {
   role: "user" | "assistant";
@@ -164,7 +166,20 @@ const MessageBubble = React.memo(({
   );
 });
 
+const GUEST_LIMIT = 5;
+const GUEST_COUNT_KEY = "nexusai-guest-count";
+
 const Index = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const isGuest = !user;
+
+  const [guestCount, setGuestCount] = useState(() => {
+    try { return parseInt(localStorage.getItem(GUEST_COUNT_KEY) || "0", 10); } catch { return 0; }
+  });
+
+  const guestLimitReached = isGuest && guestCount >= GUEST_LIMIT;
+
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
   const [activeConvId, setActiveConvId] = useState<string | null>(() => {
     const convs = loadConversations();
@@ -344,6 +359,10 @@ const Index = () => {
   const send = async () => {
     const text = input.trim();
     if (!text && attachments.length === 0) return;
+    if (guestLimitReached) {
+      navigate("/auth");
+      return;
+    }
 
     let convId = activeConvId;
     const isFirstMessage = !convId;
@@ -380,6 +399,13 @@ const Index = () => {
     });
 
     await sendMessages(apiMessages, convId, isFirstMessage);
+
+    // Increment guest counter
+    if (isGuest) {
+      const newCount = guestCount + 1;
+      setGuestCount(newCount);
+      localStorage.setItem(GUEST_COUNT_KEY, String(newCount));
+    }
   };
 
   const regenerate = useCallback(async () => {
@@ -489,10 +515,20 @@ const Index = () => {
             <h1 className="text-lg font-bold text-foreground tracking-tight">NexusAI</h1>
             <ModelSelector model={selectedModel} onChange={setSelectedModel} />
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs text-muted-foreground font-mono">Active</span>
-          </div>
+          {isGuest ? (
+            <button
+              onClick={() => navigate("/auth")}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-all"
+            >
+              <LogIn className="w-4 h-4" />
+              Se connecter
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs text-muted-foreground font-mono">Active</span>
+            </div>
+          )}
         </header>
 
         {/* Messages */}
@@ -518,6 +554,33 @@ const Index = () => {
           )}
           <div ref={bottomRef} />
         </div>
+
+        {/* Guest limit banner */}
+        {guestLimitReached && (
+          <div className="mx-4 mt-3 p-4 rounded-2xl border border-primary/30 bg-primary/5 backdrop-blur-sm flex flex-col sm:flex-row items-center gap-3 text-center sm:text-left">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-foreground">Tu as utilisé tes {GUEST_LIMIT} messages gratuits</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Crée un compte pour continuer à discuter sans limite.</p>
+            </div>
+            <button
+              onClick={() => navigate("/auth")}
+              className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-all flex items-center gap-2 whitespace-nowrap"
+            >
+              <LogIn className="w-4 h-4" />
+              Créer un compte
+            </button>
+          </div>
+        )}
+
+        {/* Guest counter */}
+        {isGuest && !guestLimitReached && (
+          <div className="mx-4 mt-2 text-center">
+            <span className="text-xs text-muted-foreground font-mono">
+              {GUEST_LIMIT - guestCount} message{GUEST_LIMIT - guestCount > 1 ? "s" : ""} restant{GUEST_LIMIT - guestCount > 1 ? "s" : ""} •{" "}
+              <button onClick={() => navigate("/auth")} className="text-primary hover:underline">Se connecter</button>
+            </span>
+          </div>
+        )}
 
         {/* Input Area */}
         <div className="border-t border-border/50 p-4 backdrop-blur-xl bg-background/80">
