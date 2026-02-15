@@ -148,7 +148,10 @@ const MessageBubble = ({ msg }: { msg: UIMessage }) => {
 
 const Index = () => {
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
-  const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const [activeConvId, setActiveConvId] = useState<string | null>(() => {
+    const convs = loadConversations();
+    return convs.length > 0 ? convs[0].id : null;
+  });
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
