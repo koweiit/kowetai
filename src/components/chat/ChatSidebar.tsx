@@ -139,13 +139,22 @@ const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, onDel
               </PopoverContent>
             </Popover>
           ) : (
-            <button
-              onClick={() => navigate("/auth")}
-              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm bg-primary text-primary-foreground hover:opacity-90 transition-all"
-            >
-              <LogIn className="w-4 h-4" />
-              Se connecter
-            </button>
+            <div className="space-y-1">
+              <button
+                onClick={() => setSettingsOpen(true)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-foreground hover:bg-secondary/50 transition-colors"
+              >
+                <Settings className="w-4 h-4 text-muted-foreground" />
+                Paramètres
+              </button>
+              <button
+                onClick={() => navigate("/auth")}
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm bg-primary text-primary-foreground hover:opacity-90 transition-all"
+              >
+                <LogIn className="w-4 h-4" />
+                Se connecter
+              </button>
+            </div>
           )}
         </div>
       </aside>
