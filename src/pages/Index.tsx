@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Copy, Check } from "lucide-react";
+import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Copy, Check, Mic, MicOff } from "lucide-react";
 import { streamChat, fileToBase64, type ChatMessage } from "@/lib/chat";
 import { toast } from "sonner";
 import { useCallback } from "react";
@@ -125,7 +125,7 @@ const MessageBubble = ({ msg }: { msg: UIMessage }) => {
         {isUser ? (
           <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
         ) : (
-          <div className="prose prose-sm prose-invert max-w-none [&_pre]:bg-background/50 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-xl [&_pre]:p-3 [&_pre]:font-mono [&_code]:text-primary [&_code]:font-mono [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_a]:text-primary [&_strong]:text-foreground [&_li]:text-foreground/90">
+          <div className="prose prose-sm prose-invert max-w-none [&_pre]:bg-background/50 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-xl [&_pre]:p-3 [&_pre]:font-mono [&_code]:text-foreground [&_code]:font-mono [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_a]:text-primary [&_strong]:text-foreground [&_li]:text-foreground/90">
             <ReactMarkdown
               components={{
                 code({ className, children, ...props }) {
@@ -159,9 +159,11 @@ const Index = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [attachments, setAttachments] = useState<{ file: File; preview: string }[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -277,6 +279,53 @@ const Index = () => {
     }
   };
 
+  const toggleVoice = () => {
+    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionAPI) {
+      toast.error("Ton navigateur ne supporte pas la reconnaissance vocale");
+      return;
+    }
+
+    if (isRecording && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognitionAPI();
+    recognition.lang = "fr-FR";
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognitionRef.current = recognition;
+
+    let finalTranscript = input;
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += (finalTranscript ? " " : "") + transcript;
+        } else {
+          interim += transcript;
+        }
+      }
+      setInput(finalTranscript + (interim ? " " + interim : ""));
+    };
+
+    recognition.onerror = () => {
+      setIsRecording(false);
+      toast.error("Erreur de reconnaissance vocale");
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognition.start();
+    setIsRecording(true);
+  };
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
@@ -375,6 +424,16 @@ const Index = () => {
             rows={1}
             className="flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none font-[inherit]"
           />
+          <button
+            onClick={toggleVoice}
+            className={`p-2.5 rounded-xl transition-all duration-200 flex-shrink-0 ${
+              isRecording
+                ? "bg-destructive text-destructive-foreground animate-pulse"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          </button>
           <button
             onClick={send}
             disabled={isLoading || (!input.trim() && attachments.length === 0)}
