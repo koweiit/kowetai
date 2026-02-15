@@ -1,8 +1,37 @@
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2 } from "lucide-react";
+import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Copy, Check } from "lucide-react";
 import { streamChat, fileToBase64, type ChatMessage } from "@/lib/chat";
 import { toast } from "sonner";
+import { useCallback } from "react";
+
+const CodeBlock = ({ children, className }: { children: React.ReactNode; className?: string }) => {
+  const [copied, setCopied] = useState(false);
+  const lang = className?.replace("language-", "") || "";
+  const code = String(children).replace(/\n$/, "");
+
+  const copy = useCallback(() => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [code]);
+
+  return (
+    <div className="relative group my-3">
+      <div className="flex items-center justify-between px-4 py-2 bg-background/80 border border-border rounded-t-xl">
+        <span className="text-xs text-muted-foreground font-mono">{lang || "code"}</span>
+        <button
+          onClick={copy}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          {copied ? "Copié !" : "Copier le code"}
+        </button>
+      </div>
+      <pre className="!mt-0 !rounded-t-none"><code className={className}>{children}</code></pre>
+    </div>
+  );
+};
 
 type UIMessage = {
   role: "user" | "assistant";
@@ -97,7 +126,22 @@ const MessageBubble = ({ msg }: { msg: UIMessage }) => {
           <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
         ) : (
           <div className="prose prose-sm prose-invert max-w-none [&_pre]:bg-background/50 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-xl [&_pre]:p-3 [&_pre]:font-mono [&_code]:text-primary [&_code]:font-mono [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_a]:text-primary [&_strong]:text-foreground [&_li]:text-foreground/90">
-            <ReactMarkdown>{msg.content}</ReactMarkdown>
+            <ReactMarkdown
+              components={{
+                code({ className, children, ...props }) {
+                  const isBlock = className?.startsWith("language-");
+                  if (isBlock) {
+                    return <CodeBlock className={className}>{children}</CodeBlock>;
+                  }
+                  return <code className={className} {...props}>{children}</code>;
+                },
+                pre({ children }) {
+                  return <>{children}</>;
+                },
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
           </div>
         )}
       </div>
