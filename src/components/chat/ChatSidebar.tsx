@@ -1,7 +1,10 @@
-import { MessageSquarePlus, Trash2, X, LogIn, LogOut } from "lucide-react";
+import { useState } from "react";
+import { MessageSquarePlus, Trash2, X, LogIn, LogOut, Settings, ChevronUp } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import SettingsDialog from "./SettingsDialog";
 
 export type Conversation = {
   id: string;
@@ -16,13 +19,19 @@ type Props = {
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (id: string) => void;
+  onDeleteAll: () => void;
   isOpen: boolean;
   onClose: () => void;
 };
 
-const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, isOpen, onClose }: Props) => {
+const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, onDeleteAll, isOpen, onClose }: Props) => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const userEmail = user?.email || "";
+  const userInitials = userEmail ? userEmail.slice(0, 2).toUpperCase() : "?";
 
   return (
     <>
@@ -81,16 +90,54 @@ const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, isOpe
           ))}
         </div>
 
-        {/* Auth button */}
+        {/* Profile / Auth section */}
         <div className="p-3 border-t border-border">
           {user ? (
-            <button
-              onClick={async () => { await supabase.auth.signOut(); navigate("/auth"); }}
-              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-colors"
-            >
-              <LogOut className="w-4 h-4" />
-              Déconnexion
-            </button>
+            <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+              <PopoverTrigger asChild>
+                <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-secondary/50 transition-colors">
+                  <div className="w-8 h-8 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center flex-shrink-0">
+                    <span className="text-xs font-bold text-primary">{userInitials}</span>
+                  </div>
+                  <span className="flex-1 text-sm text-foreground truncate text-left">{userEmail}</span>
+                  <ChevronUp className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                side="top"
+                align="start"
+                sideOffset={8}
+                className="w-64 p-1.5 bg-card border-border rounded-xl"
+              >
+                {/* User info */}
+                <div className="px-3 py-2 mb-1">
+                  <p className="text-sm font-medium text-foreground truncate">{userEmail}</p>
+                  <p className="text-xs text-muted-foreground font-mono">Plan gratuit</p>
+                </div>
+                <div className="h-px bg-border my-1" />
+
+                {/* Menu items */}
+                <button
+                  onClick={() => { setMenuOpen(false); setSettingsOpen(true); }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-foreground hover:bg-secondary/50 transition-colors"
+                >
+                  <Settings className="w-4 h-4 text-muted-foreground" />
+                  Paramètres
+                </button>
+                <div className="h-px bg-border my-1" />
+                <button
+                  onClick={async () => {
+                    setMenuOpen(false);
+                    await supabase.auth.signOut();
+                    navigate("/auth");
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-foreground hover:bg-secondary/50 transition-colors"
+                >
+                  <LogOut className="w-4 h-4 text-muted-foreground" />
+                  Se déconnecter
+                </button>
+              </PopoverContent>
+            </Popover>
           ) : (
             <button
               onClick={() => navigate("/auth")}
@@ -102,6 +149,13 @@ const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, isOpe
           )}
         </div>
       </aside>
+
+      {/* Settings dialog */}
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        onDeleteAllConversations={onDeleteAll}
+      />
     </>
   );
 };

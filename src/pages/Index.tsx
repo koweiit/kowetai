@@ -496,6 +496,12 @@ const Index = () => {
         onSelect={handleSelectConv}
         onNew={handleNewChat}
         onDelete={handleDeleteConv}
+        onDeleteAll={() => {
+          setConversations([]);
+          saveConversations([]);
+          setActiveConvId(null);
+          setMessages([]);
+        }}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
