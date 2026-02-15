@@ -1,42 +1,34 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Copy, Check, Mic, MicOff } from "lucide-react";
+import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Mic, MicOff, Menu } from "lucide-react";
 import { streamChat, fileToBase64, type ChatMessage } from "@/lib/chat";
 import { toast } from "sonner";
-import { useCallback } from "react";
-
-const CodeBlock = ({ children, className }: { children: React.ReactNode; className?: string }) => {
-  const [copied, setCopied] = useState(false);
-  const lang = className?.replace("language-", "") || "";
-  const code = String(children).replace(/\n$/, "");
-
-  const copy = useCallback(() => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [code]);
-
-  return (
-    <div className="relative group my-3">
-      <div className="flex items-center justify-between px-4 py-2 bg-background/80 border border-border rounded-t-xl">
-        <span className="text-xs text-muted-foreground font-mono">{lang || "code"}</span>
-        <button
-          onClick={copy}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-          {copied ? "Copié !" : "Copier le code"}
-        </button>
-      </div>
-      <pre className="!mt-0 !rounded-t-none"><code className={className}>{children}</code></pre>
-    </div>
-  );
-};
+import CodeBlock from "@/components/chat/CodeBlock";
+import ChatSidebar, { type Conversation } from "@/components/chat/ChatSidebar";
 
 type UIMessage = {
   role: "user" | "assistant";
   content: string;
   images?: string[];
+};
+
+const STORAGE_KEY = "nexusai-conversations";
+
+const loadConversations = (): Conversation[] => {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+};
+
+const saveConversations = (convs: Conversation[]) => {
+  // Don't save base64 images to localStorage (too large)
+  const cleaned = convs.map((c) => ({
+    ...c,
+    messages: c.messages.map((m: UIMessage) => ({ ...m, images: undefined })),
+  }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
 };
 
 const TypingDots = () => (
@@ -70,7 +62,7 @@ const EmptyState = ({ onSuggestionClick }: { onSuggestionClick: (s: string) => v
       <div>
         <h2 className="text-3xl font-bold text-foreground mb-1 glow-text">NexusAI</h2>
         <p className="text-sm text-muted-foreground font-mono tracking-wider uppercase">
-          Gemini 2.5 Pro • Multimodal • Streaming
+          Gemini 2.5 Flash • Multimodal • Streaming
         </p>
       </div>
       <p className="text-muted-foreground max-w-sm text-sm leading-relaxed">
@@ -125,7 +117,7 @@ const MessageBubble = ({ msg }: { msg: UIMessage }) => {
         {isUser ? (
           <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
         ) : (
-          <div className="prose prose-sm prose-invert max-w-none [&_pre]:bg-background/50 [&_pre]:border [&_pre]:border-border [&_pre]:rounded-xl [&_pre]:p-3 [&_pre]:font-mono [&_code]:text-foreground [&_code]:font-mono [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_a]:text-primary [&_strong]:text-foreground [&_li]:text-foreground/90">
+          <div className="prose prose-sm prose-invert max-w-none [&_pre]:bg-transparent [&_pre]:border-none [&_pre]:p-0 [&_pre]:m-0 [&_code]:text-foreground [&_code]:font-mono [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_a]:text-primary [&_strong]:text-foreground [&_li]:text-foreground/90">
             <ReactMarkdown
               components={{
                 code({ className, children, ...props }) {
@@ -155,15 +147,40 @@ const MessageBubble = ({ msg }: { msg: UIMessage }) => {
 };
 
 const Index = () => {
+  const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [attachments, setAttachments] = useState<{ file: File; preview: string }[]>([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
+
+  // Load messages when switching conversation
+  useEffect(() => {
+    if (activeConvId) {
+      const conv = conversations.find((c) => c.id === activeConvId);
+      if (conv) setMessages(conv.messages);
+    } else {
+      setMessages([]);
+    }
+  }, [activeConvId]);
+
+  // Save messages to conversation
+  useEffect(() => {
+    if (!activeConvId || messages.length === 0) return;
+    setConversations((prev) => {
+      const updated = prev.map((c) =>
+        c.id === activeConvId ? { ...c, messages } : c
+      );
+      saveConversations(updated);
+      return updated;
+    });
+  }, [messages, activeConvId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -175,6 +192,43 @@ const Index = () => {
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + "px";
     }
   }, [input]);
+
+  const createConversation = (firstMessage: string): string => {
+    const id = crypto.randomUUID();
+    const title = firstMessage.slice(0, 40) + (firstMessage.length > 40 ? "..." : "");
+    const conv: Conversation = { id, title, messages: [], createdAt: Date.now() };
+    setConversations((prev) => {
+      const updated = [conv, ...prev];
+      saveConversations(updated);
+      return updated;
+    });
+    setActiveConvId(id);
+    return id;
+  };
+
+  const handleNewChat = () => {
+    setActiveConvId(null);
+    setMessages([]);
+    setInput("");
+    setSidebarOpen(false);
+  };
+
+  const handleSelectConv = (id: string) => {
+    setActiveConvId(id);
+    setSidebarOpen(false);
+  };
+
+  const handleDeleteConv = (id: string) => {
+    setConversations((prev) => {
+      const updated = prev.filter((c) => c.id !== id);
+      saveConversations(updated);
+      return updated;
+    });
+    if (activeConvId === id) {
+      setActiveConvId(null);
+      setMessages([]);
+    }
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -199,6 +253,12 @@ const Index = () => {
   const send = async () => {
     const text = input.trim();
     if (!text && attachments.length === 0) return;
+
+    // Create conversation if needed
+    let convId = activeConvId;
+    if (!convId) {
+      convId = createConversation(text);
+    }
 
     const imageBase64s: string[] = [];
     for (const att of attachments) {
@@ -262,7 +322,6 @@ const Index = () => {
     const items = Array.from(e.clipboardData.items);
     const imageItems = items.filter((item) => item.type.startsWith("image/"));
     if (imageItems.length === 0) return;
-
     e.preventDefault();
     imageItems.forEach((item) => {
       const file = item.getAsFile();
@@ -285,21 +344,17 @@ const Index = () => {
       toast.error("Ton navigateur ne supporte pas la reconnaissance vocale");
       return;
     }
-
     if (isRecording && recognitionRef.current) {
       recognitionRef.current.stop();
       setIsRecording(false);
       return;
     }
-
     const recognition = new SpeechRecognitionAPI();
     recognition.lang = "fr-FR";
     recognition.interimResults = true;
     recognition.continuous = true;
     recognitionRef.current = recognition;
-
     let finalTranscript = input;
-
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -312,139 +367,126 @@ const Index = () => {
       }
       setInput(finalTranscript + (interim ? " " + interim : ""));
     };
-
     recognition.onerror = () => {
       setIsRecording(false);
       toast.error("Erreur de reconnaissance vocale");
     };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-
+    recognition.onend = () => setIsRecording(false);
     recognition.start();
     setIsRecording(true);
   };
 
   return (
-    <div className="flex flex-col h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border/50 px-6 py-3 flex items-center gap-3 backdrop-blur-xl bg-background/80 sticky top-0 z-10">
-        <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center glow-primary">
-          <Bot className="w-5 h-5 text-primary" />
+    <div className="flex h-screen bg-background">
+      <ChatSidebar
+        conversations={conversations}
+        activeId={activeConvId}
+        onSelect={handleSelectConv}
+        onNew={handleNewChat}
+        onDelete={handleDeleteConv}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Header */}
+        <header className="border-b border-border/50 px-4 lg:px-6 py-3 flex items-center gap-3 backdrop-blur-xl bg-background/80 sticky top-0 z-10">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="p-2 rounded-xl hover:bg-secondary/50 lg:hidden text-muted-foreground"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <div className="w-10 h-10 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center glow-primary">
+            <Bot className="w-5 h-5 text-primary" />
+          </div>
+          <div className="flex-1">
+            <h1 className="text-lg font-bold text-foreground tracking-tight">NexusAI</h1>
+            <p className="text-[10px] text-muted-foreground font-mono tracking-widest uppercase">
+              Gemini 2.5 Flash • Online
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-xs text-muted-foreground font-mono">Active</span>
+          </div>
+        </header>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+          {messages.length === 0 && <EmptyState onSuggestionClick={setInput} />}
+          {messages.map((msg, i) => (
+            <MessageBubble key={i} msg={msg} />
+          ))}
+          {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
+            <div className="flex gap-3 animate-in fade-in duration-300">
+              <div className="w-8 h-8 rounded-xl bg-primary/20 border border-primary/30 flex-shrink-0 flex items-center justify-center">
+                <Bot className="w-4 h-4 text-primary" />
+              </div>
+              <div className="bg-card/80 backdrop-blur-sm border border-border rounded-2xl rounded-bl-md px-4 py-3">
+                <TypingDots />
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
         </div>
-        <div className="flex-1">
-          <h1 className="text-lg font-bold text-foreground tracking-tight">NexusAI</h1>
-          <p className="text-[10px] text-muted-foreground font-mono tracking-widest uppercase">
-            Gemini 2.5 Pro • Online
+
+        {/* Input Area */}
+        <div className="border-t border-border/50 p-4 backdrop-blur-xl bg-background/80">
+          {attachments.length > 0 && (
+            <div className="flex gap-2 mb-3 flex-wrap">
+              {attachments.map((att, i) => (
+                <div key={i} className="relative group">
+                  {att.file.type.startsWith("image/") ? (
+                    <img src={att.preview} alt="preview" className="w-16 h-16 rounded-xl object-cover border border-border/50 ring-1 ring-primary/20" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-xl bg-card flex items-center justify-center border border-border/50">
+                      <span className="text-[10px] text-muted-foreground text-center px-1 truncate font-mono">{att.file.name}</span>
+                    </div>
+                  )}
+                  <button onClick={() => removeAttachment(i)} className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 scale-75 group-hover:scale-100">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-end gap-2 p-1.5 rounded-2xl border border-border/50 bg-card/50 backdrop-blur-sm focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition-all duration-300">
+            <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf,.txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css" onChange={handleFileSelect} className="hidden" />
+            <button onClick={() => fileInputRef.current?.click()} className="p-2.5 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all duration-200 flex-shrink-0">
+              <Paperclip className="w-5 h-5" />
+            </button>
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder="Écris ton message..."
+              rows={1}
+              className="flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none font-[inherit]"
+            />
+            <button
+              onClick={toggleVoice}
+              className={`p-2.5 rounded-xl transition-all duration-200 flex-shrink-0 ${
+                isRecording ? "bg-destructive text-destructive-foreground animate-pulse" : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+              }`}
+            >
+              {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </button>
+            <button
+              onClick={send}
+              disabled={isLoading || (!input.trim() && attachments.length === 0)}
+              className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-all duration-200 disabled:opacity-30 flex-shrink-0 glow-primary"
+            >
+              {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground/50 text-center mt-2 font-mono">
+            NexusAI peut faire des erreurs. Vérifie les informations importantes.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs text-muted-foreground font-mono">Active</span>
-        </div>
-      </header>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-        {messages.length === 0 && (
-          <EmptyState onSuggestionClick={setInput} />
-        )}
-
-        {messages.map((msg, i) => (
-          <MessageBubble key={i} msg={msg} />
-        ))}
-
-        {isLoading && messages[messages.length - 1]?.role !== "assistant" && (
-          <div className="flex gap-3 animate-in fade-in duration-300">
-            <div className="w-8 h-8 rounded-xl bg-primary/20 border border-primary/30 flex-shrink-0 flex items-center justify-center">
-              <Bot className="w-4 h-4 text-primary" />
-            </div>
-            <div className="bg-card/80 backdrop-blur-sm border border-border rounded-2xl rounded-bl-md px-4 py-3">
-              <TypingDots />
-            </div>
-          </div>
-        )}
-
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input Area */}
-      <div className="border-t border-border/50 p-4 backdrop-blur-xl bg-background/80">
-        {attachments.length > 0 && (
-          <div className="flex gap-2 mb-3 flex-wrap">
-            {attachments.map((att, i) => (
-              <div key={i} className="relative group">
-                {att.file.type.startsWith("image/") ? (
-                  <img
-                    src={att.preview}
-                    alt="preview"
-                    className="w-16 h-16 rounded-xl object-cover border border-border/50 ring-1 ring-primary/20"
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-xl bg-card flex items-center justify-center border border-border/50">
-                    <span className="text-[10px] text-muted-foreground text-center px-1 truncate font-mono">
-                      {att.file.name}
-                    </span>
-                  </div>
-                )}
-                <button
-                  onClick={() => removeAttachment(i)}
-                  className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 scale-75 group-hover:scale-100"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="flex items-end gap-2 p-1.5 rounded-2xl border border-border/50 bg-card/50 backdrop-blur-sm focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition-all duration-300">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept="image/*,.pdf,.txt,.md,.json,.csv,.py,.js,.ts,.tsx,.html,.css"
-            onChange={handleFileSelect}
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 rounded-xl text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all duration-200 flex-shrink-0"
-          >
-            <Paperclip className="w-5 h-5" />
-          </button>
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder="Écris ton message..."
-            rows={1}
-            className="flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none font-[inherit]"
-          />
-          <button
-            onClick={toggleVoice}
-            className={`p-2.5 rounded-xl transition-all duration-200 flex-shrink-0 ${
-              isRecording
-                ? "bg-destructive text-destructive-foreground animate-pulse"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-            }`}
-          >
-            {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-          </button>
-          <button
-            onClick={send}
-            disabled={isLoading || (!input.trim() && attachments.length === 0)}
-            className="p-2.5 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-all duration-200 disabled:opacity-30 flex-shrink-0 glow-primary"
-          >
-            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-          </button>
-        </div>
-        <p className="text-[10px] text-muted-foreground/50 text-center mt-2 font-mono">
-          NexusAI peut faire des erreurs. Vérifie les informations importantes.
-        </p>
       </div>
     </div>
   );
