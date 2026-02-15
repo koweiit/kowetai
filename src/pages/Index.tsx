@@ -167,7 +167,8 @@ const Index = () => {
   useEffect(() => {
     if (activeConvId) {
       const conv = conversations.find((c) => c.id === activeConvId);
-      if (conv) setMessages(conv.messages);
+      if (conv && conv.messages.length > 0) setMessages(conv.messages);
+      else if (!conv) setMessages([]);
     } else {
       setMessages([]);
     }
