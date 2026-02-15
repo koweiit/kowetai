@@ -98,6 +98,13 @@ export async function streamChat({
 }
 
 export async function generateTitle(messages: ChatMessage[]): Promise<string> {
+  // Build a summary of the conversation for better title generation
+  const summary = messages
+    .filter((m) => typeof m.content === "string")
+    .slice(-6) // last 6 messages for context
+    .map((m) => `${m.role}: ${(m.content as string).slice(0, 100)}`)
+    .join("\n");
+
   const resp = await fetch(CHAT_URL, {
     method: "POST",
     headers: {
@@ -108,7 +115,7 @@ export async function generateTitle(messages: ChatMessage[]): Promise<string> {
       messages: [
         {
           role: "user",
-          content: `Génère un titre TRÈS COURT (max 6 mots) pour cette conversation. Réponds UNIQUEMENT avec le titre, sans guillemets ni ponctuation finale.\n\nPremier message: "${typeof messages[0]?.content === 'string' ? messages[0].content : 'conversation'}"`,
+          content: `Génère un titre TRÈS COURT (max 6 mots) qui résume le SUJET PRINCIPAL de cette conversation. Réponds UNIQUEMENT avec le titre, sans guillemets ni ponctuation finale.\n\nConversation:\n${summary}`,
         },
       ],
       generateTitle: true,

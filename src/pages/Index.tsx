@@ -325,8 +325,9 @@ const Index = () => {
         signal: controller.signal,
       });
 
-      // Auto-generate title after first exchange
-      if (isFirstMessage) {
+      // Auto-generate/update title: on first message and every 5 messages
+      const totalMessages = apiMessages.length + 1; // +1 for the assistant response
+      if (isFirstMessage || totalMessages % 5 === 0) {
         generateTitle(apiMessages).then((title) => {
           updateConversationTitle(convId, title);
         }).catch(() => {});
