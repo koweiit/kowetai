@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Mic, MicOff, Menu, Square } from "lucide-react";
 import { streamChat, generateTitle, fileToBase64, type ChatMessage } from "@/lib/chat";
@@ -86,7 +86,7 @@ const EmptyState = ({ onSuggestionClick }: { onSuggestionClick: (s: string) => v
   );
 };
 
-const MessageBubble = ({
+const MessageBubble = React.memo(({
   msg,
   isLast,
   onRegenerate,
@@ -162,7 +162,7 @@ const MessageBubble = ({
       )}
     </div>
   );
-};
+});
 
 const Index = () => {
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
@@ -382,7 +382,7 @@ const Index = () => {
     await sendMessages(apiMessages, convId, isFirstMessage);
   };
 
-  const regenerate = async () => {
+  const regenerate = useCallback(async () => {
     if (isLoading || messages.length < 2) return;
 
     // Remove last assistant message
@@ -401,7 +401,7 @@ const Index = () => {
     });
 
     await sendMessages(apiMessages, activeConvId!, false);
-  };
+  }, [isLoading, messages, activeConvId, selectedModel]);
 
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData.items);
