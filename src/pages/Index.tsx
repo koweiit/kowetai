@@ -128,9 +128,9 @@ const MessageBubble = React.memo(({
             </div>
           )}
           {isUser ? (
-            <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+            <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.content}</p>
           ) : (
-            <div className="prose prose-sm prose-invert max-w-none [&_pre]:bg-transparent [&_pre]:border-none [&_pre]:p-0 [&_pre]:m-0 [&_code]:text-foreground [&_code]:font-mono [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_a]:text-primary [&_strong]:text-foreground [&_li]:text-foreground/90">
+            <div className="prose prose-sm prose-invert max-w-none text-[15px] leading-relaxed [&_p]:text-[15px] [&_p]:leading-relaxed [&_li]:text-[15px] [&_li]:leading-relaxed [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-[15px] [&_pre]:bg-transparent [&_pre]:border-none [&_pre]:p-0 [&_pre]:m-0 [&_code]:text-foreground [&_code]:font-mono [&_h1]:text-foreground [&_h2]:text-foreground [&_h3]:text-foreground [&_a]:text-primary [&_strong]:text-foreground [&_li]:text-foreground/90">
               <ReactMarkdown
                 components={{
                   code({ className, children, ...props }) {
