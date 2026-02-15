@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Mic, MicOff, Menu, Square, LogIn } from "lucide-react";
+import { Send, Paperclip, X, Bot, User, Loader2, Sparkles, Zap, Image, Code2, Mic, MicOff, Menu, Square, LogIn, LogOut } from "lucide-react";
 import { streamChat, generateTitle, fileToBase64, type ChatMessage } from "@/lib/chat";
 import { toast } from "sonner";
 import CodeBlock from "@/components/chat/CodeBlock";
@@ -9,6 +9,7 @@ import ModelSelector from "@/components/chat/ModelSelector";
 import ChatSidebar, { type Conversation } from "@/components/chat/ChatSidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
 type UIMessage = {
   role: "user" | "assistant";
@@ -524,10 +525,13 @@ const Index = () => {
               Se connecter
             </button>
           ) : (
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-xs text-muted-foreground font-mono">Active</span>
-            </div>
+            <button
+              onClick={async () => { await supabase.auth.signOut(); navigate("/auth"); }}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-all"
+            >
+              <LogOut className="w-4 h-4" />
+              Déconnexion
+            </button>
           )}
         </header>
 
