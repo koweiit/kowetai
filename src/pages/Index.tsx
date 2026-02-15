@@ -516,23 +516,10 @@ const Index = () => {
             <h1 className="text-lg font-bold text-foreground tracking-tight">NexusAI</h1>
             <ModelSelector model={selectedModel} onChange={setSelectedModel} />
           </div>
-          {isGuest ? (
-            <button
-              onClick={() => navigate("/auth")}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-all"
-            >
-              <LogIn className="w-4 h-4" />
-              Se connecter
-            </button>
-          ) : (
-            <button
-              onClick={async () => { await supabase.auth.signOut(); navigate("/auth"); }}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-all"
-            >
-              <LogOut className="w-4 h-4" />
-              Déconnexion
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-xs text-muted-foreground font-mono">Active</span>
+          </div>
         </header>
 
         {/* Messages */}

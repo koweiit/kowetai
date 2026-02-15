@@ -1,4 +1,7 @@
-import { MessageSquarePlus, Search, Trash2, X } from "lucide-react";
+import { MessageSquarePlus, Trash2, X, LogIn, LogOut } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
 export type Conversation = {
   id: string;
@@ -18,6 +21,9 @@ type Props = {
 };
 
 const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, isOpen, onClose }: Props) => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
   return (
     <>
       {/* Mobile overlay */}
@@ -73,6 +79,27 @@ const ChatSidebar = ({ conversations, activeId, onSelect, onNew, onDelete, isOpe
               </button>
             </div>
           ))}
+        </div>
+
+        {/* Auth button */}
+        <div className="p-3 border-t border-border">
+          {user ? (
+            <button
+              onClick={async () => { await supabase.auth.signOut(); navigate("/auth"); }}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+              Déconnexion
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate("/auth")}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm bg-primary text-primary-foreground hover:opacity-90 transition-all"
+            >
+              <LogIn className="w-4 h-4" />
+              Se connecter
+            </button>
+          )}
         </div>
       </aside>
     </>
