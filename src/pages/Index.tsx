@@ -226,8 +226,20 @@ const Index = () => {
     });
   }, [messages, activeConvId, user]);
 
+  const isNearBottomRef = useRef(true);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleScroll = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const threshold = 150;
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }, []);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (isNearBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
 
   // When user logs in, merge guest conversations; when logs out, clear
