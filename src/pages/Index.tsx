@@ -218,9 +218,13 @@ const Index = () => {
         c.id === activeConvId ? { ...c, messages } : c
       );
       saveConversations(updated);
+      // Also save per-user if logged in
+      if (user) {
+        localStorage.setItem(`${STORAGE_KEY}-${user.id}`, JSON.stringify(updated.map(c => ({ ...c, messages: c.messages.map((m: UIMessage) => ({ ...m, images: undefined })) }))));
+      }
       return updated;
     });
-  }, [messages, activeConvId]);
+  }, [messages, activeConvId, user]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
