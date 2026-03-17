@@ -588,7 +588,7 @@ const Index = () => {
         </header>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+        <div ref={messagesContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
           {messages.length === 0 && <EmptyState onSuggestionClick={setInput} />}
           {messages.map((msg, i) => (
             <MessageBubble
