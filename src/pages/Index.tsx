@@ -629,7 +629,11 @@ const Index = () => {
         onDelete={handleDeleteConv}
         onDeleteAll={() => {
           setConversations([]);
-          saveConversations([]);
+          if (user) {
+            supabase.from("conversations").delete().eq("user_id", user.id).then();
+          } else {
+            saveLocalConversations([]);
+          }
           setActiveConvId(null);
           setMessages([]);
         }}
