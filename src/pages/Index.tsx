@@ -218,17 +218,56 @@ const Index = () => {
         c.id === activeConvId ? { ...c, messages } : c
       );
       saveConversations(updated);
+      // Also save per-user if logged in
+      if (user) {
+        localStorage.setItem(`${STORAGE_KEY}-${user.id}`, JSON.stringify(updated.map(c => ({ ...c, messages: c.messages.map((m: UIMessage) => ({ ...m, images: undefined })) }))));
+      }
       return updated;
     });
-  }, [messages, activeConvId]);
+  }, [messages, activeConvId, user]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Reset chat when user logs out
+  // When user logs in, merge guest conversations; when logs out, clear
+  const prevUserRef = useRef<typeof user>(undefined);
   useEffect(() => {
-    if (!user) {
+    const wasGuest = prevUserRef.current === null;
+    prevUserRef.current = user;
+
+    if (user && wasGuest) {
+      // User just logged in — keep current guest conversations and merge with any saved ones
+      const guestConvs = conversations;
+      const guestMsgs = messages;
+      const guestActiveId = activeConvId;
+
+      // Load any previously saved conversations for this user
+      const userKey = `${STORAGE_KEY}-${user.id}`;
+      let savedConvs: Conversation[] = [];
+      try { savedConvs = JSON.parse(localStorage.getItem(userKey) || "[]"); } catch {}
+
+      // Merge: guest convs first, then saved ones (avoid duplicates)
+      const mergedIds = new Set(guestConvs.map(c => c.id));
+      const merged = [...guestConvs, ...savedConvs.filter(c => !mergedIds.has(c.id))];
+
+      setConversations(merged);
+      saveConversations(merged);
+      localStorage.setItem(userKey, JSON.stringify(merged));
+
+      // Keep current view (guest conversation stays visible)
+      if (guestActiveId) {
+        setActiveConvId(guestActiveId);
+        setMessages(guestMsgs);
+      }
+
+      // Clear guest counter
+      localStorage.removeItem(GUEST_COUNT_KEY);
+      setGuestCount(0);
+    } else if (!user && prevUserRef.current === undefined) {
+      // Initial load as guest — just load from generic storage
+    } else if (!user) {
+      // User logged out — clear everything
       setMessages([]);
       setActiveConvId(null);
       setConversations([]);
