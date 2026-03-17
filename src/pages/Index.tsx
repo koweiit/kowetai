@@ -363,35 +363,34 @@ const Index = () => {
   const createConversation = (firstMessage: string): string => {
     const id = crypto.randomUUID();
     const title = firstMessage.slice(0, 40) + (firstMessage.length > 40 ? "..." : "");
-    const conv: Conversation = { id, title, messages: [], createdAt: Date.now() };
-    setConversations((prev) => [conv, ...prev]);
-    if (user) {
-      supabase.from("conversations").insert({
-        id,
-        user_id: user.id,
-        title,
-        messages: [] as any,
-        created_at: conv.createdAt,
-      }).then();
-    } else {
-      setConversations((prev) => {
-        saveLocalConversations(prev);
-        return prev;
-      });
-    }
+    const conversation: Conversation = { id, title, messages: [], createdAt: Date.now() };
+    const updatedConversations = [conversation, ...conversations];
+
+    setConversations(updatedConversations);
     setActiveConvId(id);
+
+    if (user) {
+      void persistConversationToDb(conversation, user.id);
+    } else {
+      saveLocalConversations(updatedConversations);
+    }
+
     return id;
   };
 
   const updateConversationTitle = (convId: string, title: string) => {
     setConversations((prev) => {
       const updated = prev.map((c) => (c.id === convId ? { ...c, title } : c));
-      if (!user) saveLocalConversations(updated);
+      const updatedConversation = updated.find((c) => c.id === convId);
+
+      if (user && updatedConversation) {
+        void persistConversationToDb(updatedConversation, user.id);
+      } else {
+        saveLocalConversations(updated);
+      }
+
       return updated;
     });
-    if (user) {
-      supabase.from("conversations").update({ title }).eq("id", convId).then();
-    }
   };
 
   const handleNewChat = () => {
@@ -409,12 +408,16 @@ const Index = () => {
   const handleDeleteConv = (id: string) => {
     setConversations((prev) => {
       const updated = prev.filter((c) => c.id !== id);
-      if (!user) saveLocalConversations(updated);
+      if (!user) {
+        saveLocalConversations(updated);
+      }
       return updated;
     });
+
     if (user) {
-      supabase.from("conversations").delete().eq("id", id).then();
+      void supabase.from("conversations").delete().eq("id", id);
     }
+
     if (activeConvId === id) {
       setActiveConvId(null);
       setMessages([]);
