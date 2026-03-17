@@ -174,7 +174,7 @@ const GUEST_LIMIT = 5;
 const GUEST_COUNT_KEY = "nexusai-guest-count";
 
 const Index = () => {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   const isGuest = !user;
 
@@ -193,81 +193,149 @@ const Index = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState("google/gemini-2.5-flash");
-  const [dbLoaded, setDbLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const savingRef = useRef(false);
+  const isHydratingRef = useRef(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load conversations from DB (authenticated) or localStorage (guest)
+  const persistConversationToDb = useCallback(async (conversation: Conversation, currentUserId: string) => {
+    const { error } = await supabase.from("conversations").upsert({
+      id: conversation.id,
+      user_id: currentUserId,
+      title: conversation.title,
+      messages: cleanMessages(conversation.messages) as any,
+      created_at: conversation.createdAt,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      console.error("Conversation persistence failed", error);
+    }
+  }, []);
+
   useEffect(() => {
-    const loadFromDb = async () => {
-      if (user) {
-        const { data, error } = await supabase
-          .from("conversations")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false });
-        if (!error && data) {
-          const convs: Conversation[] = data.map((row: any) => ({
+    if (loading) return;
+
+    let cancelled = false;
+
+    const hydrateConversations = async () => {
+      isHydratingRef.current = true;
+
+      try {
+        if (user) {
+          const guestConversations = loadLocalConversations();
+
+          if (guestConversations.length > 0) {
+            await Promise.all(
+              guestConversations.map((conversation) =>
+                persistConversationToDb(conversation, user.id)
+              )
+            );
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(GUEST_COUNT_KEY);
+            setGuestCount(0);
+          }
+
+          const { data, error } = await supabase
+            .from("conversations")
+            .select("*")
+            .eq("user_id", user.id)
+            .order("updated_at", { ascending: false });
+
+          if (error) {
+            console.error("Conversation load failed", error);
+            if (!cancelled) {
+              setConversations([]);
+              setActiveConvId(null);
+              setMessages([]);
+            }
+            return;
+          }
+
+          const loadedConversations: Conversation[] = (data ?? []).map((row: any) => ({
             id: row.id,
             title: row.title,
-            messages: row.messages as UIMessage[],
+            messages: Array.isArray(row.messages) ? (row.messages as UIMessage[]) : [],
             createdAt: row.created_at,
           }));
-          setConversations(convs);
-          if (convs.length > 0 && !activeConvId) {
-            setActiveConvId(convs[0].id);
-          }
+
+          if (cancelled) return;
+
+          setConversations(loadedConversations);
+          setActiveConvId((currentActiveId) =>
+            loadedConversations.some((c) => c.id === currentActiveId)
+              ? currentActiveId
+              : loadedConversations[0]?.id ?? null
+          );
+          return;
         }
-      } else {
-        const local = loadLocalConversations();
-        setConversations(local);
-        if (local.length > 0) setActiveConvId(local[0].id);
+
+        const localConversations = loadLocalConversations();
+        if (cancelled) return;
+
+        setConversations(localConversations);
+        setActiveConvId((currentActiveId) =>
+          localConversations.some((c) => c.id === currentActiveId)
+            ? currentActiveId
+            : localConversations[0]?.id ?? null
+        );
+      } finally {
+        if (!cancelled) {
+          isHydratingRef.current = false;
+        }
       }
-      setDbLoaded(true);
     };
-    loadFromDb();
-  }, [user]);
 
-  // Load messages when switching conversation
+    void hydrateConversations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, loading, persistConversationToDb]);
+
   useEffect(() => {
-    if (activeConvId) {
-      const conv = conversations.find((c) => c.id === activeConvId);
-      if (conv && conv.messages.length > 0) setMessages(conv.messages);
-      else if (!conv) setMessages([]);
-    } else {
+    if (!activeConvId) {
       setMessages([]);
+      return;
     }
-  }, [activeConvId]);
 
-  // Save messages to conversation (DB or localStorage)
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const conversation = conversations.find((c) => c.id === activeConvId);
+    setMessages(conversation?.messages ?? []);
+  }, [activeConvId, conversations]);
+
   useEffect(() => {
-    if (!activeConvId || messages.length === 0) return;
-    setConversations((prev) => {
-      const updated = prev.map((c) =>
-        c.id === activeConvId ? { ...c, messages } : c
-      );
-      if (!user) {
-        saveLocalConversations(updated);
-      }
-      return updated;
-    });
-    // Debounced DB save for authenticated users
-    if (user) {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(() => {
-        supabase
-          .from("conversations")
-          .update({ messages: cleanMessages(messages) as any, updated_at: new Date().toISOString() })
-          .eq("id", activeConvId)
-          .then();
-      }, 1000);
+    if (!activeConvId || isHydratingRef.current) return;
+
+    const conversation = conversations.find((c) => c.id === activeConvId);
+    if (!conversation) return;
+
+    const updatedConversation = { ...conversation, messages };
+    const updatedConversations = conversations.map((c) =>
+      c.id === activeConvId ? updatedConversation : c
+    );
+
+    const hasChanged = JSON.stringify(conversation.messages) !== JSON.stringify(messages);
+    if (!hasChanged) return;
+
+    setConversations(updatedConversations);
+
+    if (!user) {
+      saveLocalConversations(updatedConversations);
+      return;
     }
-  }, [messages, activeConvId, user]);
+
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      void persistConversationToDb(updatedConversation, user.id);
+    }, 300);
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [messages, activeConvId, conversations, user, persistConversationToDb]);
 
   const isNearBottomRef = useRef(true);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -284,62 +352,6 @@ const Index = () => {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages]);
-
-  // When user logs in, merge guest conversations to DB; when logs out, clear
-  const prevUserRef = useRef<typeof user>(undefined);
-  useEffect(() => {
-    const wasGuest = prevUserRef.current === null;
-    prevUserRef.current = user;
-
-    if (user && wasGuest) {
-      const guestConvs = conversations;
-      const guestActiveId = activeConvId;
-      const guestMsgs = messages;
-
-      const migrateToDb = async () => {
-        for (const conv of guestConvs) {
-          await supabase.from("conversations").upsert({
-            id: conv.id,
-            user_id: user.id,
-            title: conv.title,
-            messages: cleanMessages(conv.messages) as any,
-            created_at: conv.createdAt,
-          });
-        }
-        const { data } = await supabase
-          .from("conversations")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false });
-        if (data) {
-          const convs: Conversation[] = data.map((row: any) => ({
-            id: row.id,
-            title: row.title,
-            messages: row.messages as UIMessage[],
-            createdAt: row.created_at,
-          }));
-          setConversations(convs);
-          if (guestActiveId) {
-            setActiveConvId(guestActiveId);
-            setMessages(guestMsgs);
-          }
-        }
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem(GUEST_COUNT_KEY);
-        setGuestCount(0);
-      };
-      migrateToDb();
-    } else if (!user && prevUserRef.current === undefined) {
-      // Initial load as guest
-    } else if (!user) {
-      setMessages([]);
-      setActiveConvId(null);
-      setConversations([]);
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem(GUEST_COUNT_KEY);
-      setGuestCount(0);
-    }
-  }, [user]);
 
   useEffect(() => {
     if (textareaRef.current) {
