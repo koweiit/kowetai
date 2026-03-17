@@ -184,11 +184,8 @@ const Index = () => {
 
   const guestLimitReached = isGuest && guestCount >= GUEST_LIMIT;
 
-  const [conversations, setConversations] = useState<Conversation[]>(loadConversations);
-  const [activeConvId, setActiveConvId] = useState<string | null>(() => {
-    const convs = loadConversations();
-    return convs.length > 0 ? convs[0].id : null;
-  });
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -196,11 +193,44 @@ const Index = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState("google/gemini-2.5-flash");
+  const [dbLoaded, setDbLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const savingRef = useRef(false);
+
+  // Load conversations from DB (authenticated) or localStorage (guest)
+  useEffect(() => {
+    const loadFromDb = async () => {
+      if (user) {
+        const { data, error } = await supabase
+          .from("conversations")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+        if (!error && data) {
+          const convs: Conversation[] = data.map((row: any) => ({
+            id: row.id,
+            title: row.title,
+            messages: row.messages as UIMessage[],
+            createdAt: row.created_at,
+          }));
+          setConversations(convs);
+          if (convs.length > 0 && !activeConvId) {
+            setActiveConvId(convs[0].id);
+          }
+        }
+      } else {
+        const local = loadLocalConversations();
+        setConversations(local);
+        if (local.length > 0) setActiveConvId(local[0].id);
+      }
+      setDbLoaded(true);
+    };
+    loadFromDb();
+  }, [user]);
 
   // Load messages when switching conversation
   useEffect(() => {
@@ -213,20 +243,30 @@ const Index = () => {
     }
   }, [activeConvId]);
 
-  // Save messages to conversation
+  // Save messages to conversation (DB or localStorage)
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!activeConvId || messages.length === 0) return;
     setConversations((prev) => {
       const updated = prev.map((c) =>
         c.id === activeConvId ? { ...c, messages } : c
       );
-      saveConversations(updated);
-      // Also save per-user if logged in
-      if (user) {
-        localStorage.setItem(`${STORAGE_KEY}-${user.id}`, JSON.stringify(updated.map(c => ({ ...c, messages: c.messages.map((m: UIMessage) => ({ ...m, images: undefined })) }))));
+      if (!user) {
+        saveLocalConversations(updated);
       }
       return updated;
     });
+    // Debounced DB save for authenticated users
+    if (user) {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(() => {
+        supabase
+          .from("conversations")
+          .update({ messages: cleanMessages(messages) as any, updated_at: new Date().toISOString() })
+          .eq("id", activeConvId)
+          .then();
+      }, 1000);
+    }
   }, [messages, activeConvId, user]);
 
   const isNearBottomRef = useRef(true);
