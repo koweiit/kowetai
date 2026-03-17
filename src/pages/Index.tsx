@@ -19,7 +19,7 @@ type UIMessage = {
 
 const STORAGE_KEY = "nexusai-conversations";
 
-const loadConversations = (): Conversation[] => {
+const loadLocalConversations = (): Conversation[] => {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
   } catch {
@@ -27,13 +27,16 @@ const loadConversations = (): Conversation[] => {
   }
 };
 
-const saveConversations = (convs: Conversation[]) => {
+const saveLocalConversations = (convs: Conversation[]) => {
   const cleaned = convs.map((c) => ({
     ...c,
     messages: c.messages.map((m: UIMessage) => ({ ...m, images: undefined })),
   }));
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
 };
+
+const cleanMessages = (msgs: UIMessage[]) =>
+  msgs.map((m) => ({ role: m.role, content: m.content }));
 
 const TypingDots = () => (
   <div className="flex items-center gap-1.5 px-1 py-1">
