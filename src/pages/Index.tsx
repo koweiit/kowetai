@@ -285,44 +285,53 @@ const Index = () => {
     }
   }, [messages]);
 
-  // When user logs in, merge guest conversations; when logs out, clear
+  // When user logs in, merge guest conversations to DB; when logs out, clear
   const prevUserRef = useRef<typeof user>(undefined);
   useEffect(() => {
     const wasGuest = prevUserRef.current === null;
     prevUserRef.current = user;
 
     if (user && wasGuest) {
-      // User just logged in — keep current guest conversations and merge with any saved ones
       const guestConvs = conversations;
-      const guestMsgs = messages;
       const guestActiveId = activeConvId;
+      const guestMsgs = messages;
 
-      // Load any previously saved conversations for this user
-      const userKey = `${STORAGE_KEY}-${user.id}`;
-      let savedConvs: Conversation[] = [];
-      try { savedConvs = JSON.parse(localStorage.getItem(userKey) || "[]"); } catch {}
-
-      // Merge: guest convs first, then saved ones (avoid duplicates)
-      const mergedIds = new Set(guestConvs.map(c => c.id));
-      const merged = [...guestConvs, ...savedConvs.filter(c => !mergedIds.has(c.id))];
-
-      setConversations(merged);
-      saveConversations(merged);
-      localStorage.setItem(userKey, JSON.stringify(merged));
-
-      // Keep current view (guest conversation stays visible)
-      if (guestActiveId) {
-        setActiveConvId(guestActiveId);
-        setMessages(guestMsgs);
-      }
-
-      // Clear guest counter
-      localStorage.removeItem(GUEST_COUNT_KEY);
-      setGuestCount(0);
+      const migrateToDb = async () => {
+        for (const conv of guestConvs) {
+          await supabase.from("conversations").upsert({
+            id: conv.id,
+            user_id: user.id,
+            title: conv.title,
+            messages: cleanMessages(conv.messages) as any,
+            created_at: conv.createdAt,
+          });
+        }
+        const { data } = await supabase
+          .from("conversations")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+        if (data) {
+          const convs: Conversation[] = data.map((row: any) => ({
+            id: row.id,
+            title: row.title,
+            messages: row.messages as UIMessage[],
+            createdAt: row.created_at,
+          }));
+          setConversations(convs);
+          if (guestActiveId) {
+            setActiveConvId(guestActiveId);
+            setMessages(guestMsgs);
+          }
+        }
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(GUEST_COUNT_KEY);
+        setGuestCount(0);
+      };
+      migrateToDb();
     } else if (!user && prevUserRef.current === undefined) {
-      // Initial load as guest — just load from generic storage
+      // Initial load as guest
     } else if (!user) {
-      // User logged out — clear everything
       setMessages([]);
       setActiveConvId(null);
       setConversations([]);
@@ -343,11 +352,21 @@ const Index = () => {
     const id = crypto.randomUUID();
     const title = firstMessage.slice(0, 40) + (firstMessage.length > 40 ? "..." : "");
     const conv: Conversation = { id, title, messages: [], createdAt: Date.now() };
-    setConversations((prev) => {
-      const updated = [conv, ...prev];
-      saveConversations(updated);
-      return updated;
-    });
+    setConversations((prev) => [conv, ...prev]);
+    if (user) {
+      supabase.from("conversations").insert({
+        id,
+        user_id: user.id,
+        title,
+        messages: [] as any,
+        created_at: conv.createdAt,
+      }).then();
+    } else {
+      setConversations((prev) => {
+        saveLocalConversations(prev);
+        return prev;
+      });
+    }
     setActiveConvId(id);
     return id;
   };
@@ -355,9 +374,12 @@ const Index = () => {
   const updateConversationTitle = (convId: string, title: string) => {
     setConversations((prev) => {
       const updated = prev.map((c) => (c.id === convId ? { ...c, title } : c));
-      saveConversations(updated);
+      if (!user) saveLocalConversations(updated);
       return updated;
     });
+    if (user) {
+      supabase.from("conversations").update({ title }).eq("id", convId).then();
+    }
   };
 
   const handleNewChat = () => {
@@ -375,9 +397,12 @@ const Index = () => {
   const handleDeleteConv = (id: string) => {
     setConversations((prev) => {
       const updated = prev.filter((c) => c.id !== id);
-      saveConversations(updated);
+      if (!user) saveLocalConversations(updated);
       return updated;
     });
+    if (user) {
+      supabase.from("conversations").delete().eq("id", id).then();
+    }
     if (activeConvId === id) {
       setActiveConvId(null);
       setMessages([]);
